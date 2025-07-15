@@ -37,8 +37,7 @@ class SchemaHandler:
 
     def _standardize_models(self):
         documentation = self.serverless_config.get('custom', {}).get('documentation', {})
-
-        standardized_models = []
+        
         model_sources = []
         if 'models' in documentation:
             models_config = self._resolve_file_references(documentation['models'])
@@ -51,6 +50,15 @@ class SchemaHandler:
         if 'modelsList' in documentation:
             model_sources.extend(self._resolve_file_references(documentation['modelsList']))
 
+        api_gateway_models = self.serverless_config.get('provider', {}).get('apiGateway', {}).get('request', {}).get('schemas', {})
+        if api_gateway_models:
+            for model_key, model_definition in api_gateway_models.items():
+                if 'name' not in model_definition:
+                    model_definition['name'] = model_key
+                model_definition['key'] = model_key
+                model_sources.append(model_definition)
+
+        standardized_models = []
         for model in model_sources:
             if not isinstance(model, dict) or 'name' not in model:
                 continue
@@ -61,6 +69,8 @@ class SchemaHandler:
                 'name': model.get('name'),
                 'description': model.get('description', ''),
             }
+            if 'key' in model:
+                std_model['key'] = model['key']
             if 'contentType' in model and 'schema' in model:
                 std_model['contentType'] = model['contentType']
                 std_model['schema'] = model['schema']
@@ -163,19 +173,15 @@ class SchemaHandler:
         
         schema = self._clean_schema(schema)
 
-        registry = Registry()
-        if "definitions" in schema:
-            for name, sub_schema in schema["definitions"].items():
-                resource = Resource.from_contents(self._clean_schema(sub_schema), default_specification=DRAFT4)
-                registry = registry.with_resource(f"#/definitions/{name}", resource)
+        resource = Resource.from_contents(schema, default_specification=DRAFT4)
+        registry = Registry().with_resource("root", resource).crawl()
+        resolver = registry.resolver(base_uri="root")
         
-        main_resource = Resource.from_contents(schema, default_specification=DRAFT4)
-        registry = registry.with_resource("root", main_resource)
-        resolver = registry.resolver("root")
         dereferenced_schema = self._recursive_dereference(schema, resolver)
         
         if isinstance(dereferenced_schema, dict):
             dereferenced_schema.pop("definitions", None)
+
         return dereferenced_schema
 
     def _recursive_dereference(self, node, resolver):
@@ -183,7 +189,7 @@ class SchemaHandler:
             if "$ref" in node:
                 try:
                     resolved = resolver.lookup(node["$ref"])
-                    return self._recursive_dereference(resolved.contents, resolver)
+                    return self._recursive_dereference(resolved.contents, resolved.resolver)
                 except Exception:
                     return node
             return {k: self._recursive_dereference(v, resolver) for k, v in node.items()}

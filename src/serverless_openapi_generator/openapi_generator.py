@@ -188,11 +188,30 @@ class DefinitionGenerator:
             obj['requestBody'] = self.create_request_body(documentation.get('requestBody'))
         elif http_event.get('request', {}).get('schemas'):
             # Handle request schemas defined directly on the event
-            request_body_doc = {
-                'description': 'Request body inferred from event schema',
-                'requestModels': http_event['request']['schemas']
-            }
-            obj['requestBody'] = self.create_request_body(request_body_doc)
+            schemas = http_event['request']['schemas']
+            content = {}
+            for media_type, schema_info in schemas.items():
+                if isinstance(schema_info, str):
+                    schema_name = schema_info
+                    # Find the model name from the standardized models
+                    model = next((model for model in self.schema_handler.models if model.get('key') == schema_name), None)
+                    if model:
+                        content[media_type] = {
+                            'schema': {
+                                '$ref': f"#/components/schemas/{model['name']}"
+                            }
+                        }
+                elif isinstance(schema_info, dict):
+                    schema_name = ''.join(word.capitalize() for word in re.split(r'[/_-]', media_type))
+                    schema_ref = self.schema_handler.create_schema(schema_name, schema_info)
+                    content[media_type] = {'schema': {'$ref': schema_ref}}
+
+            if content:
+                obj['requestBody'] = {
+                    'description': 'Request body inferred from event schema',
+                    'content': content,
+                    'required': True
+                }
 
         # Handle private endpoints
         if http_event.get('private') is True:
@@ -264,24 +283,16 @@ class DefinitionGenerator:
         return responses
 
     def create_media_type_object(self, models):
-        media_type_obj = {}
-        for media_type, model_info in models.items():
-            # Handle both simple model names and complex objects with schema
-            if isinstance(model_info, str):
-                model_name = model_info
-            elif isinstance(model_info, dict) and 'name' in model_info:
-                model_name = model_info['name']
-            else:
-                # Fallback for inline schemas, though we'll focus on named models
-                continue
-            
-            if model_name in self.open_api['components']['schemas']:
-                media_type_obj[media_type] = {
-                    'schema': {
-                        '$ref': f"#/components/schemas/{model_name}"
-                    }
-                }
-        return media_type_obj
+        content = {}
+        if models:
+            for media_type, schema_name in models.items():
+                print(f"Schema name: {schema_name}")
+                print(f"Models: {self.schema_handler.models}")
+                model_info = next((model for model in self.schema_handler.models if model['name'] == schema_name), None)
+                if model_info:
+                    schema_ref = self.schema_handler.create_schema(schema_name, model_info.get('schema'))
+                    content[media_type] = {'schema': {'$ref': schema_ref}}
+        return content
 
     def create_request_body(self, request_body_doc):
         content = self.create_media_type_object(request_body_doc.get('requestModels', {}))
