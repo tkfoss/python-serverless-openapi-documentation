@@ -2,6 +2,7 @@ import json
 import uuid
 import os
 import re
+import yaml
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT4
 import requests
@@ -13,19 +14,34 @@ class SchemaHandler:
         self.serverless_dir = serverless_dir
         self.models = self._standardize_models()
 
+    def _resolve_file_references(self, value):
+        if isinstance(value, dict):
+            return {k: self._resolve_file_references(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [self._resolve_file_references(item) for item in value]
+        elif isinstance(value, str):
+            match = re.match(r'\${file\((.*)\)}', value)
+            if match:
+                file_path = match.group(1).strip()
+                abs_path = os.path.join(self.serverless_dir, file_path)
+                try:
+                    with open(abs_path, 'r') as f:
+                        if file_path.endswith('.json'):
+                            return json.load(f)
+                        else:
+                            return yaml.safe_load(f)
+                except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
+                    print(f"Warning: Could not read or parse file reference {abs_path}: {e}")
+                    return value
+        return value
+
     def _standardize_models(self):
-        documentation = self.serverless_config.get('custom', {})
-        if not documentation:
-            service_config = self.serverless_config.get('service', {})
-            if isinstance(service_config, dict):
-                documentation = service_config.get('custom', {}).get('documentation', {})
-            else:
-                documentation = {}
+        documentation = self.serverless_config.get('custom', {}).get('documentation', {})
 
         standardized_models = []
         model_sources = []
         if 'models' in documentation:
-            models_config = documentation['models']
+            models_config = self._resolve_file_references(documentation['models'])
             if isinstance(models_config, list):
                 model_sources.extend(models_config)
             elif isinstance(models_config, dict):
@@ -33,11 +49,14 @@ class SchemaHandler:
                     model_sources.append({'name': name, **definition})
         
         if 'modelsList' in documentation:
-            model_sources.extend(documentation['modelsList'])
+            model_sources.extend(self._resolve_file_references(documentation['modelsList']))
 
         for model in model_sources:
             if not isinstance(model, dict) or 'name' not in model:
                 continue
+            
+            model = self._resolve_file_references(model)
+
             std_model = {
                 'name': model.get('name'),
                 'description': model.get('description', ''),
@@ -67,24 +86,6 @@ class SchemaHandler:
             name = f"{name}-{uuid.uuid4()}"
         self.open_api['components']['schemas'][name] = final_schema
         return f"#/components/schemas/{name}"
-
-    def _resolve_file_references(self, value):
-        if isinstance(value, dict):
-            return {k: self._resolve_file_references(v) for k, v in value.items()}
-        elif isinstance(value, list):
-            return [self._resolve_file_references(item) for item in value]
-        elif isinstance(value, str):
-            match = re.match(r'\${file\((.*)\)}', value)
-            if match:
-                file_path = match.group(1).strip()
-                abs_path = os.path.join(self.serverless_dir, file_path)
-                try:
-                    with open(abs_path, 'r') as f:
-                        return json.load(f)
-                except (IOError, json.JSONDecodeError) as e:
-                    print(f"Warning: Could not read or parse file reference {abs_path}: {e}")
-                    return value
-        return value
 
     def _resolve_schema_references(self, schema):
         schema = self._resolve_file_references(schema)

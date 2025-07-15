@@ -35,8 +35,11 @@ class DefinitionGenerator:
                 abs_path = os.path.join(self.serverless_dir, file_path)
                 try:
                     with open(abs_path, 'r') as f:
-                        return yaml.safe_load(f)
-                except (IOError, yaml.YAMLError) as e:
+                        if file_path.endswith('.json'):
+                            return json.load(f)
+                        else:
+                            return yaml.safe_load(f)
+                except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
                     print(f"Warning: Could not read or parse file reference {abs_path}: {e}")
                     return value
         return value
@@ -128,13 +131,18 @@ class DefinitionGenerator:
                     continue
                 
                 # Handle path parameters
+                if path.startswith('/'):
+                    path = path[1:]
+                
                 if documentation.get('pathParams'):
                     for param in documentation.get('pathParams'):
                         path = path.replace(f"{{{param['name']}}}", "") # Remove if already there
                     path_params_str = "/".join([f"{{{p['name']}}}" for p in documentation.get('pathParams')])
-                    full_path = f"/{path}/{path_params_str}".replace('//','/')
+                    full_path = f"/{path}/{path_params_str}"
                 else:
                     full_path = f"/{path}"
+                
+                full_path = full_path.replace('//', '/')
 
 
                 if full_path not in paths:
