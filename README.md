@@ -33,6 +33,14 @@ python -m build
 pip install dist/serverless_openapi_generator-1.0.0-py3-none-any.whl
 ```
 
+or run as `uv` tool:
+
+```bash
+uvx --from git+https://github.com/tkfoss/python-serverless-openapi-documentation.git openapi-gen generate-spec openapi.json --serverless-yml-path path/to/your/serverless.yml
+```
+
+For more information on running tools with `uv`, see the [official documentation](https://docs.astral.sh/uv/guides/tools/#running-tools).
+
 ### CLI
 
 The tool now uses a sub-command structure for different stages of the generation process.
@@ -161,6 +169,21 @@ The workflow is as follows:
 3.  **Generate OpenAPI Spec:** Use the `generate-spec` command with the newly created `serverless.yml` to generate the final `openapi.json`.
 
 > **Note:** For the Pydantic schema generation to work correctly, the Python environment where you run `openapi-gen` must have all the dependencies of your project installed. This is because the tool needs to import your Pydantic models to generate the schemas.
+
+### Complete Example
+
+Here is a complete example of how to generate a validated OpenAPI specification from a Python project with Pydantic models:
+
+```bash
+# Step 1: Generate JSON schemas from your Pydantic models
+openapi-gen generate-schemas --pydantic-source ./src --output-dir ./openapi_models
+
+# Step 2: Generate a serverless.yml file
+openapi-gen generate-serverless --schema-dir ./openapi_models --project-dir .
+
+# Step 3: Generate the OpenAPI specification and validate it
+openapi-gen generate-spec openapi.json --serverless-yml-path serverless.yml --validate
+```
 
 ## License
 
