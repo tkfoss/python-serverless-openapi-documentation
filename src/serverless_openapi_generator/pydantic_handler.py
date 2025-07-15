@@ -7,7 +7,7 @@ import sys
 import tomllib
 from pathlib import Path
 import yaml
-
+from rich import print as rprint
 from pydantic import BaseModel
 
 try:
@@ -32,21 +32,21 @@ def patch_token_region_request_schema(schema_file_path):
 
         if isinstance(any_of_list, list) and len(any_of_list) > 1:
             if any_of_list[1] == {}:  # Check if the problematic empty object is at index 1
-                print(
-                    f"    Patching {schema_file_path}: changing properties.body.anyOf[1] from {{}} to {{'type': 'object'}}"
+                rprint(
+                    f"    [yellow]Patching {schema_file_path}: changing properties.body.anyOf[1] from {{}} to {{'type': 'object'}}[/yellow]"
                 )
                 any_of_list[1] = {"type": "object"}
 
                 with open(schema_file_path, "w") as f:
                     json.dump(schema_data, f, indent=2)
-                print(f"    Successfully patched {schema_file_path}")
+                rprint(f"    [green]Successfully patched {schema_file_path}[/green]")
     except Exception as e:
-        print(f"    Error patching {schema_file_path}: {e}")
+        rprint(f"    [red]Error patching {schema_file_path}: {e}[/red]")
 
 
 def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path):
     """Generates JSON schemas for Pydantic DTOs and returns a dict of successful ones."""
-    print(f"Searching for DTOs in: {source_dir}")
+    rprint(f"[bold]Searching for DTOs in: {source_dir}[/bold]")
     sys.path.insert(0, str(project_root))
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -59,7 +59,7 @@ def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path)
             continue
         processed_dto_files.add(dto_file_path)
 
-        print(f"  Processing DTO file: {dto_file_path}")
+        rprint(f"  [cyan]Processing DTO file: {dto_file_path}[/cyan]")
         relative_path = dto_file_path.relative_to(project_root)
         module_name_parts = list(relative_path.parts)
         if module_name_parts[-1] == "dtos.py":
@@ -73,10 +73,10 @@ def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path)
                 sys.modules[module_name] = module
                 spec.loader.exec_module(module)
             else:
-                print(f"\tCould not create module spec for {dto_file_path}")
+                rprint(f"\t[yellow]Could not create module spec for {dto_file_path}[/yellow]")
                 continue
         except Exception as e:
-            print(f"\tError importing module {module_name} from {dto_file_path}: {e}")
+            rprint(f"\t[red]Error importing module {module_name} from {dto_file_path}: {e}[/red]")
             if module_name in sys.modules:
                 del sys.modules[module_name]
             continue
@@ -86,9 +86,9 @@ def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path)
                 if hasattr(obj, "__module__") and obj.__module__ == module_name:
                     discovered_models.append((obj, name, module_name))
 
-    print(f"\nFound {len(discovered_models)} Pydantic models from {len(processed_dto_files)} DTO file(s).")
+    rprint(f"\n[bold]Found {len(discovered_models)} Pydantic models from {len(processed_dto_files)} DTO file(s).[/bold]")
 
-    print("\nPhase 2: Rebuilding all discovered models...")
+    rprint("\n[bold]Phase 2: Rebuilding all discovered models...[/bold]")
     rebuilt_models_count = 0
     models_for_schema_gen = []
     for model_class, model_name, module_name in discovered_models:
@@ -100,39 +100,39 @@ def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path)
             rebuilt_models_count += 1
             models_for_schema_gen.append((model_class, model_name, module_name))
         except Exception as e:
-            print(f"  Error rebuilding model {module_name}.{model_name}: {e}")
+            rprint(f"  [red]Error rebuilding model {module_name}.{model_name}: {e}[/red]")
             models_for_schema_gen.append((model_class, model_name, module_name))
 
-    print(f"Attempted to rebuild {rebuilt_models_count} models.")
+    rprint(f"Attempted to rebuild {rebuilt_models_count} models.")
 
-    print("\nPhase 3: Generating JSON schemas for DTOs...")
+    rprint("\n[bold]Phase 3: Generating JSON schemas for DTOs...[/bold]")
     for model_class, model_name, module_name in models_for_schema_gen:
-        print(f"  Generating schema for: {module_name}.{model_name}")
+        rprint(f"  [cyan]Generating schema for: {module_name}.{model_name}[/cyan]")
         try:
             if hasattr(model_class, "model_json_schema"):
                 schema = model_class.model_json_schema()
             elif hasattr(model_class, "schema_json"):
                 schema = json.loads(model_class.schema_json())
             else:
-                print(f"\tCould not find schema generation method for model {model_name}")
+                rprint(f"\t[yellow]Could not find schema generation method for model {model_name}[/yellow]")
                 continue
 
             schema_file_name = f"{model_name}.json"
             schema_file_path = output_dir / schema_file_name
             with open(schema_file_path, "w") as f:
                 json.dump(schema, f, indent=2)
-            print(f"\tSchema saved to: {schema_file_path}")
+            rprint(f"\t[green]Schema saved to: {schema_file_path}[/green]")
 
             if model_name == "TokenRegionRequest":
                 patch_token_region_request_schema(schema_file_path)
 
             successfully_generated_schemas[model_name] = schema_file_name
         except PydanticInvalidForJsonSchema as e:
-            print(f"\tError: Cannot generate JSON schema for {module_name}.{model_name}. Details: {e}")
+            rprint(f"\t[red]Error: Cannot generate JSON schema for {module_name}.{model_name}. Details: {e}[/red]")
         except Exception as e:
-            print(f"\tError generating/saving schema for model {module_name}.{model_name}: {e}")
+            rprint(f"\t[red]Error generating/saving schema for model {module_name}.{model_name}: {e}[/red]")
 
-    print(f"\nSuccessfully generated {len(successfully_generated_schemas)} DTO JSON schema file(s).")
+    rprint(f"\n[bold green]Successfully generated {len(successfully_generated_schemas)} DTO JSON schema file(s).[/bold green]")
     return successfully_generated_schemas
 
 
@@ -147,7 +147,7 @@ def parse_author_string(author_str):
 def load_project_meta(project_root: Path):
     """Loads project metadata from pyproject.toml."""
     pyproject_file = project_root / "pyproject.toml"
-    print(f"\nLoading project metadata from {pyproject_file}...")
+    rprint(f"\n[bold]Loading project metadata from {pyproject_file}...[/bold]")
     meta = {
         "title": "My API",
         "version": "0.1.0",
@@ -166,19 +166,19 @@ def load_project_meta(project_root: Path):
         authors = poetry_data.get("authors", [])
         if authors and isinstance(authors, list) and authors[0]:
             meta["contact_name"], meta["contact_email"] = parse_author_string(authors[0])
-        print(f"  API Title: {meta['title']}, Version: {meta['version']}, Description: {meta['description']}")
+        rprint(f"  [cyan]API Title:[/] {meta['title']}, [cyan]Version:[/] {meta['version']}, [cyan]Description:[/] {meta['description']}")
         if meta["contact_name"]:
-            print(f"  Contact Name: {meta['contact_name']}, Email: {meta['contact_email']}")
+            rprint(f"  [cyan]Contact Name:[/] {meta['contact_name']}, [cyan]Email:[/] {meta['contact_email']}")
     except FileNotFoundError:
-        print(f"  Error: {pyproject_file} not found. Using default API info.")
+        rprint(f"  [red]Error: {pyproject_file} not found. Using default API info.[/red]")
     except Exception as e:
-        print(f"  Error reading {pyproject_file}: {e}. Using default API info.")
+        rprint(f"  [red]Error reading {pyproject_file}: {e}. Using default API info.[/red]")
     return meta
 
 
 def generate_serverless_config(successfully_generated_schemas, project_meta, project_root: Path):
     """Generates a serverless configuration in memory."""
-    print("\nGenerating Serverless config for OpenAPI in memory...")
+    rprint("\n[bold]Generating Serverless config for OpenAPI in memory...[/bold]")
     python_runtime = "python3.12"
     try:
         main_sls_file = project_root / "serverless-wo-cross-accounts.yml"
@@ -187,9 +187,9 @@ def generate_serverless_config(successfully_generated_schemas, project_meta, pro
                 main_config = yaml.safe_load(f)
             if main_config and "provider" in main_config and "runtime" in main_config["provider"]:
                 python_runtime = main_config["provider"]["runtime"]
-                print(f"  Using runtime '{python_runtime}' from {main_sls_file}")
+                rprint(f"  [cyan]Using runtime '{python_runtime}' from {main_sls_file}[/cyan]")
     except Exception as e:
-        print(f"  Could not determine runtime, defaulting to {python_runtime}. Error: {e}")
+        rprint(f"  [yellow]Could not determine runtime, defaulting to {python_runtime}. Error: {e}[/yellow]")
 
     model_entries = []
     if successfully_generated_schemas:
@@ -228,21 +228,20 @@ def generate_serverless_config(successfully_generated_schemas, project_meta, pro
         try:
             with open(functions_file, "r") as f:
                 functions_content = yaml.safe_load(f)
-            print(f"  Successfully loaded functions from {functions_file}")
+            rprint(f"  [green]Successfully loaded functions from {functions_file}[/green]")
         except Exception as e:
-            print(f"  Warning: Could not read or parse functions file {functions_file}: {e}")
+            rprint(f"  [yellow]Warning: Could not read or parse functions file {functions_file}: {e}[/yellow]")
     else:
-        print("  Warning: functions.yml not found. No operations will be generated.")
+        rprint("  [yellow]Warning: functions.yml not found. No operations will be generated.[/yellow]")
 
 
     config_content = {
-        "service": "identity-oauth-docs-builder",
-        "frameworkVersion": "^4.0",
-        "provider": {"name": "aws", "runtime": python_runtime, "stage": "integration"},
+        "service": project_meta.get("title", "my-api").lower().replace(" ", "-"),
+        "frameworkVersion": ">=3.0.0",
+        "provider": {"name": "aws", "runtime": python_runtime},
         "plugins": ["serverless-openapi-documenter"],
         "custom": {
-            "documentation": documentation_block,
-            "variables": {"lambda_warm_instances": 1, "lambda_memory_size": 256},
+            "documentation": documentation_block
         },
         "functions": functions_content,
     }
