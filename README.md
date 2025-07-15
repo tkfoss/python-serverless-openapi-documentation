@@ -2,10 +2,16 @@
 
 <p>
   <a href="https://www.python.org">
-    <img src="https://img.shields.io/badge/python-3.8+-blue.svg">
+    <img src="https://img.shields.io/badge/python-3.11+-blue.svg">
   </a>
-  <a href="https://github.com/JaredCE/serverless-openapi-documenter/blob/main/LICENSE">
+  <a href="https://github.com/tkfoss/python-serverless-openapi-documentation/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-yellow.svg">
+  </a>
+  <a href="https://github.com/tkfoss/python-serverless-openapi-documentation/actions/workflows/python-ci.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/tkfoss/python-serverless-openapi-documentation/python-ci.yml">
+  </a>
+  <a href="https://github.com/tkfoss/python-serverless-openapi-documentation/actions/workflows/python-ci.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/tkfoss/python-serverless-openapi-documentation/dependabot%2Fdependabot-updates?label=dependabot">
   </a>
 </p>
 
