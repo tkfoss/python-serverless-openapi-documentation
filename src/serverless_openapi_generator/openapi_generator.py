@@ -427,11 +427,10 @@ def main():
     # Execute the Pydantic schema generation if the source is provided
     if args.pydantic_source:
         print(f"--- Running Pydantic schema generation from: {args.pydantic_source} ---")
-        source_path = Path(args.pydantic_source)
-        project_root = source_path.parent
+        project_root = Path(args.pydantic_source)
         output_dir = project_root / "openapi_models"
         
-        generated_schemas = pydantic_handler.generate_dto_schemas(source_path, output_dir, project_root)
+        generated_schemas = pydantic_handler.generate_dto_schemas(project_root, output_dir, project_root)
         project_meta = pydantic_handler.load_project_meta(project_root)
         
         serverless_config = pydantic_handler.generate_serverless_config(generated_schemas, project_meta, project_root)
