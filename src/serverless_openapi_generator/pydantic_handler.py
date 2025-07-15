@@ -1,0 +1,241 @@
+# type: ignore
+import importlib.util
+import inspect
+import json
+import re
+import sys
+import tomllib
+from pathlib import Path
+import yaml
+
+from pydantic import BaseModel
+
+try:
+    from pydantic.errors import PydanticInvalidForJsonSchema
+except ImportError:
+    PydanticInvalidForJsonSchema = Exception
+
+
+def is_pydantic_model(obj):
+    """Checks if an object is a Pydantic model class, excluding BaseModel itself."""
+    return inspect.isclass(obj) and issubclass(obj, BaseModel) and obj is not BaseModel
+
+
+def patch_token_region_request_schema(schema_file_path):
+    """Specifically patches the TokenRegionRequest.json schema for the body.anyOf[1] issue."""
+    try:
+        with open(schema_file_path, "r") as f:
+            schema_data = json.load(f)
+
+        body_prop = schema_data.get("properties", {}).get("body", {})
+        any_of_list = body_prop.get("anyOf")
+
+        if isinstance(any_of_list, list) and len(any_of_list) > 1:
+            if any_of_list[1] == {}:  # Check if the problematic empty object is at index 1
+                print(
+                    f"    Patching {schema_file_path}: changing properties.body.anyOf[1] from {{}} to {{'type': 'object'}}"
+                )
+                any_of_list[1] = {"type": "object"}
+
+                with open(schema_file_path, "w") as f:
+                    json.dump(schema_data, f, indent=2)
+                print(f"    Successfully patched {schema_file_path}")
+    except Exception as e:
+        print(f"    Error patching {schema_file_path}: {e}")
+
+
+def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path):
+    """Generates JSON schemas for Pydantic DTOs and returns a dict of successful ones."""
+    print(f"Searching for DTOs in: {source_dir}")
+    sys.path.insert(0, str(project_root))
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    discovered_models = []
+    processed_dto_files = set()
+    successfully_generated_schemas = {}
+
+    for dto_file_path in source_dir.rglob("**/dtos.py"):
+        if dto_file_path in processed_dto_files:
+            continue
+        processed_dto_files.add(dto_file_path)
+
+        print(f"  Processing DTO file: {dto_file_path}")
+        relative_path = dto_file_path.relative_to(project_root)
+        module_name_parts = list(relative_path.parts)
+        if module_name_parts[-1] == "dtos.py":
+            module_name_parts[-1] = "dtos"
+        module_name = ".".join(part for part in module_name_parts if part != "__pycache__")
+
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, dto_file_path)
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
+            else:
+                print(f"\tCould not create module spec for {dto_file_path}")
+                continue
+        except Exception as e:
+            print(f"\tError importing module {module_name} from {dto_file_path}: {e}")
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+            continue
+
+        for name, obj in inspect.getmembers(module):
+            if is_pydantic_model(obj):
+                if hasattr(obj, "__module__") and obj.__module__ == module_name:
+                    discovered_models.append((obj, name, module_name))
+
+    print(f"\nFound {len(discovered_models)} Pydantic models from {len(processed_dto_files)} DTO file(s).")
+
+    print("\nPhase 2: Rebuilding all discovered models...")
+    rebuilt_models_count = 0
+    models_for_schema_gen = []
+    for model_class, model_name, module_name in discovered_models:
+        try:
+            if hasattr(model_class, "model_rebuild"):
+                model_class.model_rebuild(force=True)
+            elif hasattr(model_class, "update_forward_refs"):
+                model_class.update_forward_refs()
+            rebuilt_models_count += 1
+            models_for_schema_gen.append((model_class, model_name, module_name))
+        except Exception as e:
+            print(f"  Error rebuilding model {module_name}.{model_name}: {e}")
+            models_for_schema_gen.append((model_class, model_name, module_name))
+
+    print(f"Attempted to rebuild {rebuilt_models_count} models.")
+
+    print("\nPhase 3: Generating JSON schemas for DTOs...")
+    for model_class, model_name, module_name in models_for_schema_gen:
+        print(f"  Generating schema for: {module_name}.{model_name}")
+        try:
+            if hasattr(model_class, "model_json_schema"):
+                schema = model_class.model_json_schema()
+            elif hasattr(model_class, "schema_json"):
+                schema = json.loads(model_class.schema_json())
+            else:
+                print(f"\tCould not find schema generation method for model {model_name}")
+                continue
+
+            schema_file_name = f"{model_name}.json"
+            schema_file_path = output_dir / schema_file_name
+            with open(schema_file_path, "w") as f:
+                json.dump(schema, f, indent=2)
+            print(f"\tSchema saved to: {schema_file_path}")
+
+            if model_name == "TokenRegionRequest":
+                patch_token_region_request_schema(schema_file_path)
+
+            successfully_generated_schemas[model_name] = schema_file_name
+        except PydanticInvalidForJsonSchema as e:
+            print(f"\tError: Cannot generate JSON schema for {module_name}.{model_name}. Details: {e}")
+        except Exception as e:
+            print(f"\tError generating/saving schema for model {module_name}.{model_name}: {e}")
+
+    print(f"\nSuccessfully generated {len(successfully_generated_schemas)} DTO JSON schema file(s).")
+    return successfully_generated_schemas
+
+
+def parse_author_string(author_str):
+    """Parses an author string into name and email."""
+    match = re.match(r"^(.*?)\s*<([^>]+)>$", author_str)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    return author_str.strip(), None
+
+
+def load_project_meta(project_root: Path):
+    """Loads project metadata from pyproject.toml."""
+    pyproject_file = project_root / "pyproject.toml"
+    print(f"\nLoading project metadata from {pyproject_file}...")
+    meta = {
+        "title": "My API",
+        "version": "0.1.0",
+        "description": "API documentation",
+        "contact_name": None,
+        "contact_email": None,
+    }
+    try:
+        with open(pyproject_file, "rb") as f:
+            data = tomllib.load(f)
+        poetry_data = data.get("tool", {}).get("poetry", {})
+        name = poetry_data.get("name", "my-api")
+        meta["title"] = name.replace("_", " ").replace("-", " ").title() + " API"
+        meta["version"] = poetry_data.get("version", "0.1.0")
+        meta["description"] = poetry_data.get("description", "API documentation")
+        authors = poetry_data.get("authors", [])
+        if authors and isinstance(authors, list) and authors[0]:
+            meta["contact_name"], meta["contact_email"] = parse_author_string(authors[0])
+        print(f"  API Title: {meta['title']}, Version: {meta['version']}, Description: {meta['description']}")
+        if meta["contact_name"]:
+            print(f"  Contact Name: {meta['contact_name']}, Email: {meta['contact_email']}")
+    except FileNotFoundError:
+        print(f"  Error: {pyproject_file} not found. Using default API info.")
+    except Exception as e:
+        print(f"  Error reading {pyproject_file}: {e}. Using default API info.")
+    return meta
+
+
+def generate_serverless_config(successfully_generated_schemas, project_meta, project_root: Path):
+    """Generates a serverless configuration in memory."""
+    print("\nGenerating Serverless config for OpenAPI in memory...")
+    python_runtime = "python3.12"
+    try:
+        main_sls_file = project_root / "serverless-wo-cross-accounts.yml"
+        if main_sls_file.exists():
+            with open(main_sls_file, "r") as f:
+                main_config = yaml.safe_load(f)
+            if main_config and "provider" in main_config and "runtime" in main_config["provider"]:
+                python_runtime = main_config["provider"]["runtime"]
+                print(f"  Using runtime '{python_runtime}' from {main_sls_file}")
+    except Exception as e:
+        print(f"  Could not determine runtime, defaulting to {python_runtime}. Error: {e}")
+
+    model_entries = []
+    if successfully_generated_schemas:
+        for model_name, schema_file_name in sorted(successfully_generated_schemas.items()):
+            description = f"Schema for {model_name}"
+            try:
+                with open(project_root / "openapi_models" / schema_file_name, "r") as sf:
+                    schema_content = json.load(sf)
+                if "description" in schema_content and schema_content["description"]:
+                    description = schema_content["description"]
+            except Exception:  # nosec
+                pass
+            model_entries.append(
+                {
+                    "name": model_name,
+                    "description": description,
+                    "contentType": "application/json",
+                    "schema": "${file(openapi_models/" + schema_file_name + ")}",
+                }
+            )
+
+    documentation_block = {
+        "version": project_meta["version"],
+        "title": project_meta["title"],
+        "description": project_meta["description"],
+        "models": model_entries,
+    }
+    if project_meta["contact_name"]:
+        documentation_block["contact"] = {"name": project_meta["contact_name"]}
+        if project_meta["contact_email"]:
+            documentation_block["contact"]["email"] = project_meta["contact_email"]
+
+    functions_file = project_root / "serverless" / "functions.yml"
+    functions_ref = f"${{file(./serverless/functions.yml)}}" if functions_file.exists() else {}
+
+
+    config_content = {
+        "service": "identity-oauth-docs-builder",
+        "frameworkVersion": "^4.0",
+        "provider": {"name": "aws", "runtime": python_runtime, "stage": "integration"},
+        "plugins": ["serverless-openapi-documenter"],
+        "custom": {
+            "documentation": documentation_block,
+            "variables": {"lambda_warm_instances": 1, "lambda_memory_size": 256},
+        },
+        "functions": functions_ref,
+    }
+    
+    return config_content

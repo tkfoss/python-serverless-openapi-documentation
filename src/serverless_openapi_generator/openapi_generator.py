@@ -4,8 +4,10 @@ import yaml
 import os
 import re
 import subprocess
+from pathlib import Path
 from . import owasp
 from .schema_handler import SchemaHandler
+from . import pydantic_handler
 
 class DefinitionGenerator:
     def __init__(self, serverless_config, serverless_yml_path, openapi_version='3.0.3'):
@@ -398,12 +400,16 @@ class DefinitionGenerator:
 
 def main():
     parser = argparse.ArgumentParser(description='Generate OpenAPI v3 documentation from a serverless.yml file.')
-    parser.add_argument('serverless_yml_path', type=str, help='Path to the serverless.yml file')
     parser.add_argument('output_file_path', type=str, help='Path to the output OpenAPI JSON file')
+    parser.add_argument('--serverless-yml-path', type=str, help='Path to the serverless.yml file. Required if --pydantic-source is not used.')
     parser.add_argument('--openApiVersion', type=str, default='3.0.3', help='OpenAPI version to use')
     parser.add_argument('--pre-hook', type=str, help='Path to a Python script to run before generation')
+    parser.add_argument('--pydantic-source', type=str, help='Path to the Pydantic models source directory')
     parser.add_argument('--validate', action='store_true', help='Validate the generated OpenAPI spec')
     args = parser.parse_args()
+
+    if not args.serverless_yml_path and not args.pydantic_source:
+        parser.error("Either --serverless-yml-path or --pydantic-source must be provided.")
 
     # Execute the pre-hook script if provided
     if args.pre_hook:
@@ -418,17 +424,35 @@ def main():
             print(f"Error executing pre-hook script: {e}")
             return
 
-    try:
-        with open(args.serverless_yml_path, 'r') as f:
-            serverless_config = yaml.safe_load(f)
-    except FileNotFoundError:
-        print(f"Error: The file {args.serverless_yml_path} was not found.")
-        return
-    except yaml.YAMLError as e:
-        print(f"Error parsing YAML file: {e}")
-        return
+    # Execute the Pydantic schema generation if the source is provided
+    if args.pydantic_source:
+        print(f"--- Running Pydantic schema generation from: {args.pydantic_source} ---")
+        source_path = Path(args.pydantic_source)
+        project_root = source_path.parent
+        output_dir = project_root / "openapi_models"
+        
+        generated_schemas = pydantic_handler.generate_dto_schemas(source_path, output_dir, project_root)
+        project_meta = pydantic_handler.load_project_meta(project_root)
+        
+        serverless_config = pydantic_handler.generate_serverless_config(generated_schemas, project_meta, project_root)
+        
+        # Use a virtual file path in the project root for correct base directory resolution
+        effective_sls_path = project_root / "serverless.yml"
+        
+        print("--- Pydantic schema generation finished successfully ---")
+    else:
+        try:
+            with open(args.serverless_yml_path, 'r') as f:
+                serverless_config = yaml.safe_load(f)
+            effective_sls_path = args.serverless_yml_path
+        except FileNotFoundError:
+            print(f"Error: The file {args.serverless_yml_path} was not found.")
+            return
+        except yaml.YAMLError as e:
+            print(f"Error parsing YAML file: {e}")
+            return
 
-    generator = DefinitionGenerator(serverless_config, args.serverless_yml_path, args.openApiVersion)
+    generator = DefinitionGenerator(serverless_config, str(effective_sls_path), args.openApiVersion)
     open_api_spec = generator.generate()
 
     try:

@@ -9,7 +9,7 @@
   </a>
 </p>
 
-This tool generates an OpenAPI V3 file from your `serverless.yml` file. It is a standalone Python application that parses the `custom.documentation` section of your serverless configuration to produce a complete OpenAPI specification. This currently works for `http` and `httpApi` configurations.
+This tool generates an OpenAPI V3 file from either a `serverless.yml` file or directly from your project's Pydantic models. It is a standalone Python application that can produce a complete OpenAPI specification for your serverless project or any Python application that uses Pydantic for data validation.
 
 ## Install
 
@@ -44,16 +44,17 @@ For more information on running tools with `uv`, see the [official documentation
 
 **To Run:**
 ```bash
-openapi-gen path/to/your/serverless.yml openapi.json --openApiVersion 3.0.3
+openapi-gen openapi.json --serverless-yml-path path/to/your/serverless.yml
 ```
 
 **Options:**
 
 ```
-serverless_yml_path      Path to the serverless.yml file. (Required)
 output_file_path         Path to the output OpenAPI JSON file. (Required)
+--serverless-yml-path    Path to the serverless.yml file. (Required if --pydantic-source is not used)
 --openApiVersion         The OpenAPI version to generate for. Default: 3.0.3
 --pre-hook               Path to a Python script to run before generation.
+--pydantic-source        Path to the Pydantic models source directory.
 --validate               Validate the generated OpenAPI spec.
 ```
 
@@ -135,6 +136,19 @@ The documentation format for functions, models, security schemes, and other prop
 *   **Specification Extensions**: Supports custom `x-` fields in most sections of the documentation.
 *   **Pre-processing Hooks**: Allows running a custom Python script to generate schemas or configurations before the main tool runs.
 
+### Pydantic Schema Generation
+
+This tool can automatically generate JSON schemas from your Pydantic models and create a complete OpenAPI specification, even if your project does not use the Serverless Framework. To use this feature, provide the path to your Pydantic models' source directory using the `--pydantic-source` argument. The tool will generate a serverless configuration in memory to facilitate the OpenAPI generation process.
+
+The tool will search for `dtos.py` files within the specified directory, generate JSON schemas for all Pydantic models found, and place them in an `openapi_models` directory at the root of your project. It will also extract project metadata from your `pyproject.toml` file to populate the `info` section of the OpenAPI document.
+
+> **Note:** For the Pydantic schema generation to work correctly, the Python environment where you run `openapi-gen` must have all the dependencies of your project installed. This is because the tool needs to import your Pydantic models to generate the schemas. You can typically install your project's dependencies using a command like `pip install -r requirements.txt` or `poetry install`.
+
+**To Run with Pydantic:**
+```bash
+openapi-gen openapi.json --pydantic-source path/to/your/pydantic/models
+```
+
 ### Pre-processing Hooks
 
 You can use the `--pre-hook` argument to specify a Python script that will be executed before the OpenAPI generation begins. This is useful for programmatically generating parts of your `serverless.yml` or the schema files it references.
@@ -160,7 +174,7 @@ if __name__ == "__main__":
 
 You would then run the tool like this:
 ```bash
-openapi-gen serverless.yml openapi.json --pre-hook generate_schemas.py
+openapi-gen openapi.json --serverless-yml-path serverless.yml --pre-hook generate_schemas.py
 ```
 The `openapi-gen` tool will first execute `generate_schemas.py`, which creates the `models/MyModel.json` file. Then, when the generator processes your `serverless.yml`, it can reference that newly created schema via `${file(models/MyModel.json)}`.
 
