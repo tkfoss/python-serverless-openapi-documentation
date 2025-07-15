@@ -17,38 +17,31 @@
 
 This tool generates an OpenAPI V3 file from either a `serverless.yml` file or directly from your project's Pydantic models. It is a standalone Python application that can produce a complete OpenAPI specification for your serverless project or any Python application that uses Pydantic for data validation.
 
-## Install
+## Use
 
-This tool requires Python 3.8+.
+Not yet on PyPi - install from git 
 
-First, ensure you have the necessary Python packaging tools installed:
+```bash
+pip install git+https://github.com/tkfoss/python-serverless-openapi-documentation.git
+```
+
+or build and install from source:
+
 ```bash
 pip install build
-```
-
-Then, build the package from the root of this repository:
-```bash
 python -m build
-```
-
-This will create a `dist` directory containing the installable package. You can install it using pip:
-```bash
 pip install dist/serverless_openapi_generator-1.0.0-py3-none-any.whl
 ```
 
-## Usage
+or run as `uv` tool:
 
-Once installed, you can use the `openapi-gen` command-line tool.
-
-### Running from GitHub
-
-You can also run the tool directly from GitHub using `uvx`:
 ```bash
 uvx --from git+https://github.com/tkfoss/python-serverless-openapi-documentation.git openapi-gen path/to/your/serverless.yml openapi.json
 ```
+
 For more information on running tools with `uv`, see the [official documentation](https://docs.astral.sh/uv/guides/tools/#running-tools).
 
-**To Run:**
+**CLI:**
 ```bash
 openapi-gen openapi.json --serverless-yml-path path/to/your/serverless.yml
 ```
