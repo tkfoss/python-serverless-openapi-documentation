@@ -47,7 +47,11 @@ def patch_token_region_request_schema(schema_file_path):
 def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path):
     """Generates JSON schemas for Pydantic DTOs and returns a dict of successful ones."""
     rprint(f"[bold]Searching for DTOs in: {source_dir}[/bold]")
-    sys.path.insert(0, str(project_root))
+    
+    # Add the parent of the source directory to the path to allow for package-level imports
+    import_root = source_dir.parent
+    sys.path.insert(0, str(import_root))
+    
     output_dir.mkdir(parents=True, exist_ok=True)
 
     discovered_models = []
@@ -60,7 +64,7 @@ def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path)
         processed_dto_files.add(dto_file_path)
 
         rprint(f"  [cyan]Processing DTO file: {dto_file_path}[/cyan]")
-        relative_path = dto_file_path.relative_to(project_root)
+        relative_path = dto_file_path.relative_to(import_root)
         module_name_parts = list(relative_path.parts)
         if module_name_parts[-1] == "dtos.py":
             module_name_parts[-1] = "dtos"
@@ -193,21 +197,20 @@ def generate_serverless_config(successfully_generated_schemas, project_meta, pro
 
     model_entries = []
     if successfully_generated_schemas:
-        for model_name, schema_file_name in sorted(successfully_generated_schemas.items()):
-            description = f"Schema for {model_name}"
-            try:
-                with open(project_root / "openapi_models" / schema_file_name, "r") as sf:
-                    schema_content = json.load(sf)
-                if "description" in schema_content and schema_content["description"]:
-                    description = schema_content["description"]
-            except Exception:  # nosec
-                pass
+        for schema_info in sorted(successfully_generated_schemas, key=lambda x: x['name']):
+            model_name = schema_info['name']
+            description = schema_info.get('description', f"Schema for {model_name}")
+            
+            # The schema is already loaded, so we can embed it directly or reference it
+            # For this implementation, we'll stick to the file reference model
+            schema_file_name = f"{model_name}.json"
+
             model_entries.append(
                 {
                     "name": model_name,
                     "description": description,
                     "contentType": "application/json",
-                    "schema": "${file(openapi_models/" + schema_file_name + ")}",
+                    "schema": f"${{file(openapi_models/{schema_file_name})}}",
                 }
             )
 
