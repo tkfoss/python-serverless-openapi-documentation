@@ -274,12 +274,13 @@ class DefinitionGenerator:
             else:
                 # Fallback for inline schemas, though we'll focus on named models
                 continue
-
-            media_type_obj[media_type] = {
-                'schema': {
-                    '$ref': f"#/components/schemas/{model_name}"
+            
+            if model_name in self.open_api['components']['schemas']:
+                media_type_obj[media_type] = {
+                    'schema': {
+                        '$ref': f"#/components/schemas/{model_name}"
+                    }
                 }
-            }
         return media_type_obj
 
     def create_request_body(self, request_body_doc):
@@ -391,6 +392,7 @@ def main():
     parser.add_argument('output_file_path', type=str, help='Path to the output OpenAPI JSON file')
     parser.add_argument('--openApiVersion', type=str, default='3.0.3', help='OpenAPI version to use')
     parser.add_argument('--pre-hook', type=str, help='Path to a Python script to run before generation')
+    parser.add_argument('--validate', action='store_true', help='Validate the generated OpenAPI spec')
     args = parser.parse_args()
 
     # Execute the pre-hook script if provided
@@ -425,6 +427,15 @@ def main():
         print(f"OpenAPI specification successfully written to {args.output_file_path}")
     except IOError as e:
         print(f"Error writing to output file: {e}")
+
+    if args.validate:
+        from openapi_spec_validator import validate
+        print("Validating generated spec...")
+        try:
+            validate(open_api_spec)
+            print("Validation successful.")
+        except Exception as e:
+            print(f"Validation failed: {e}")
 
 if __name__ == '__main__':
     main()

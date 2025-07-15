@@ -21,6 +21,7 @@ dependencies = [
     "requests",
     "referencing",
     "jsonschema-spec",
+    "openapi-spec-validator",
 ]
 
 [tool.setuptools.packages.find]
@@ -28,3 +29,4 @@ where = ["src"]
 
 [project.scripts]
 openapi-gen = "serverless_openapi_generator.openapi_generator:main"
+openapi-validate = "openapi_spec_validator.__main__:main"

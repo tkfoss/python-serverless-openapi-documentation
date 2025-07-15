@@ -34,6 +34,14 @@ pip install dist/serverless_openapi_generator-1.0.0-py3-none-any.whl
 
 Once installed, you can use the `openapi-gen` command-line tool.
 
+### Running from GitHub
+
+You can also run the tool directly from GitHub using `uvx`:
+```bash
+uvx --from git+https://github.com/tkfoss/python-serverless-openapi-documentation.git openapi-gen path/to/your/serverless.yml openapi.json
+```
+For more information on running tools with `uv`, see the [official documentation](https://docs.astral.sh/uv/guides/tools/#running-tools).
+
 **To Run:**
 ```bash
 openapi-gen path/to/your/serverless.yml openapi.json --openApiVersion 3.0.3
@@ -46,6 +54,21 @@ serverless_yml_path      Path to the serverless.yml file. (Required)
 output_file_path         Path to the output OpenAPI JSON file. (Required)
 --openApiVersion         The OpenAPI version to generate for. Default: 3.0.3
 --pre-hook               Path to a Python script to run before generation.
+--validate               Validate the generated OpenAPI spec.
+```
+
+### Validation
+
+This tool also includes a script to validate an OpenAPI specification file against the OpenAPI 3.0.3 specification.
+
+**To Run:**
+```bash
+openapi-validate path/to/your/openapi.json
+```
+
+You can also use the `--validate` flag with the `openapi-gen` command to automatically validate the generated spec:
+```bash
+openapi-gen path/to/your/serverless.yml openapi.json --validate
 ```
 
 ### Configuration

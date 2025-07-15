@@ -87,6 +87,67 @@ class SchemaHandler:
         self.open_api['components']['schemas'][name] = final_schema
         return f"#/components/schemas/{name}"
 
+    def _clean_schema(self, schema):
+        if isinstance(schema, dict):
+            # Replace $defs with definitions and update refs
+            if '$defs' in schema:
+                if 'definitions' not in schema:
+                    schema['definitions'] = {}
+                schema['definitions'].update(schema.pop('$defs'))
+                
+                def update_refs(node):
+                    if isinstance(node, dict):
+                        if '$ref' in node and node['$ref'].startswith('#/$defs/'):
+                            node['$ref'] = node['$ref'].replace('#/$defs/', '#/definitions/')
+                        for key, value in node.items():
+                            update_refs(value)
+                    elif isinstance(node, list):
+                        for item in node:
+                            update_refs(item)
+                update_refs(schema)
+
+            # Replace const with enum
+            if 'const' in schema:
+                schema['enum'] = [schema.pop('const')]
+
+            # Remove propertyNames
+            if 'propertyNames' in schema:
+                del schema['propertyNames']
+            
+            # Handle nullable
+            if 'anyOf' in schema:
+                is_nullable = False
+                new_any_of = []
+                for item in schema['anyOf']:
+                    if isinstance(item, dict) and item.get('type') == 'null':
+                        is_nullable = True
+                    else:
+                        new_any_of.append(item)
+                
+                if is_nullable:
+                    for item in new_any_of:
+                        if isinstance(item, dict):
+                            item['nullable'] = True
+                
+                if not new_any_of:
+                    del schema['anyOf']
+                    schema['nullable'] = True
+                elif len(new_any_of) == 1:
+                    for key, value in new_any_of[0].items():
+                        if key not in schema:
+                            schema[key] = value
+                    del schema['anyOf']
+                    if is_nullable:
+                        schema['nullable'] = True
+                else:
+                    schema['anyOf'] = new_any_of
+
+            # Recurse
+            return {k: self._clean_schema(v) for k, v in schema.items()}
+        elif isinstance(schema, list):
+            return [self._clean_schema(item) for item in schema]
+        return schema
+
     def _resolve_schema_references(self, schema):
         schema = self._resolve_file_references(schema)
         if not isinstance(schema, dict):
@@ -100,10 +161,12 @@ class SchemaHandler:
             else:
                 return schema
         
+        schema = self._clean_schema(schema)
+
         registry = Registry()
         if "definitions" in schema:
             for name, sub_schema in schema["definitions"].items():
-                resource = Resource.from_contents(sub_schema, default_specification=DRAFT4)
+                resource = Resource.from_contents(self._clean_schema(sub_schema), default_specification=DRAFT4)
                 registry = registry.with_resource(f"#/definitions/{name}", resource)
         
         main_resource = Resource.from_contents(schema, default_specification=DRAFT4)
@@ -118,8 +181,11 @@ class SchemaHandler:
     def _recursive_dereference(self, node, resolver):
         if isinstance(node, dict):
             if "$ref" in node:
-                resolved = resolver.lookup(node["$ref"])
-                return self._recursive_dereference(resolved.contents, resolver)
+                try:
+                    resolved = resolver.lookup(node["$ref"])
+                    return self._recursive_dereference(resolved.contents, resolver)
+                except Exception:
+                    return node
             return {k: self._recursive_dereference(v, resolver) for k, v in node.items()}
         elif isinstance(node, list):
             return [self._recursive_dereference(item, resolver) for item in node]
