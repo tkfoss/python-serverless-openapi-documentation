@@ -23,5 +23,8 @@ dependencies = [
     "jsonschema-spec",
 ]
 
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [project.scripts]
-openapi-gen = "src.openapi_generator:main"
+openapi-gen = "serverless_openapi_generator.openapi_generator:main"

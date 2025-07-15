@@ -5,8 +5,8 @@ import uuid
 import os
 import re
 import subprocess
-from src import owasp
-from src.schema_handler import SchemaHandler
+from . import owasp
+from .schema_handler import SchemaHandler
 
 class DefinitionGenerator:
     def __init__(self, serverless_config, serverless_yml_path, openapi_version='3.0.3'):
