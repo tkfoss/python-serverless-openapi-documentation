@@ -32,6 +32,7 @@ dev = [
     "pytest>=8.3.5",
     "pytest-mock>=3.14.1",
     "requests-mock>=1.12.1",
+    "ruff>=0.12.3",
 ]
 
 [project.scripts]

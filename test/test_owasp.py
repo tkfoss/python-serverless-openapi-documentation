@@ -1,6 +1,4 @@
-import requests_mock
 import json
-import pytest
 
 # It's better to import the module we are testing
 from serverless_openapi_generator import owasp

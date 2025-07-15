@@ -1,7 +1,6 @@
 import argparse
 import json
 import yaml
-import uuid
 import os
 import re
 import subprocess
@@ -411,7 +410,7 @@ def main():
         print(f"--- Running pre-hook script: {args.pre_hook} ---")
         try:
             subprocess.run(['python', args.pre_hook], check=True, text=True)
-            print(f"--- Pre-hook script finished successfully ---")
+            print("--- Pre-hook script finished successfully ---")
         except FileNotFoundError:
             print(f"Error: Pre-hook script not found at {args.pre_hook}")
             return

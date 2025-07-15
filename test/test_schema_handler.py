@@ -1,6 +1,5 @@
 import json
 import pytest
-import requests_mock
 from serverless_openapi_generator.schema_handler import SchemaHandler
 
 # Mock data similar to the JS test helpers
