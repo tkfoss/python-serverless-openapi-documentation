@@ -1,0 +1,19 @@
+service: serverless-owasp-test
+provider:
+  name: aws
+  runtime: nodejs14.x
+
+functions:
+  testOwasp:
+    handler: handler.hello
+    events:
+      - http:
+          path: test
+          method: get
+          documentation:
+            summary: Test OWASP headers
+            methodResponses:
+              - statusCode: 200
+                responseBody:
+                  description: A success response
+                owasp: true

@@ -1,37 +1,43 @@
-service: serverless-openapi-doc-demo
-frameworkVersion: ">=3.0.0 < 4.0.0"
+service: serverless-inferred-test
 provider:
   name: aws
   runtime: nodejs14.x
-
-plugins:
-  - ../../../index.js
+  apiGateway:
+    request:
+      schemas:
+        inferred-model:
+          name: InferredModel
+          schema:
+            type: object
+            properties:
+              id:
+                type: string
 
 functions:
-  updateUser:
-    handler: handler.update
+  privateEndpoint:
+    handler: handler.hello
     events:
-      - httpApi:
-          path: 'PUT /update'
-          cors: true
-
-  createUser:
-    handler: handler.create
+      - http:
+          path: private
+          method: get
+          private: true
+          documentation:
+            methodResponses:
+              - statusCode: 200
+                responseBody:
+                  description: "A private response"
+  
+  inferredRequest:
+    handler: handler.world
     events:
-      - httpApi:
-          path: 'POST /create/{id}'
-          cors: true
-
-  # createUser:
-  #   handler: handler.create
-  #   events:
-  #     - httpApi:
-  #         path: /create
-  #         method: '*'
-  #         cors: true
-
-  # createUser:
-  #   handler: handler.create
-  #   events:
-  #     - httpApi: '*'
-
+      - http:
+          path: inferred
+          method: post
+          request:
+            schemas:
+              application/json: inferred-model
+          documentation:
+            methodResponses:
+              - statusCode: 200
+                responseBody:
+                  description: "An inferred request response"

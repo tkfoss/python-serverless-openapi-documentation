@@ -1,0 +1,28 @@
+service: serverless-security-test
+provider:
+  name: aws
+  runtime: nodejs14.x
+
+functions:
+  test:
+    handler: handler.hello
+    events:
+      - http:
+          path: test
+          method: get
+
+custom:
+  documentation:
+    securitySchemes:
+      my_api_key:
+        type: apiKey
+        name: X-API-KEY
+        in: header
+      my_oauth:
+        type: oauth2
+        flows:
+          implicit:
+            authorizationUrl: https://example.com/api/oauth/dialog
+            scopes:
+              "write:pets": "modify pets in your account"
+              "read:pets": "read your pets"

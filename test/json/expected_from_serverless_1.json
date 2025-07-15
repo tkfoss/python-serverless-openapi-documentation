@@ -1,0 +1,92 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "serverless-openapi-doc-demo",
+    "description": "",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/create/{username}": {
+      "post": {
+        "summary": "Create User",
+        "description": "Creates a user and then sends a generated password email",
+        "operationId": "serverless-openapi-doc-demo-dev-createUser",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "description": "The username for a user to create",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/username"
+            }
+          },
+          {
+            "name": "membershipType",
+            "in": "query",
+            "description": "The user's Membership Type",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/membershipType"
+            }
+          },
+          {
+            "name": "SessionId",
+            "in": "cookie",
+            "description": "A Session ID variable",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SessionId"
+            }
+          }
+        ],
+        "tags": [],
+        "responses": {
+          "201": {
+            "description": "A user object along with generated API Keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PutDocumentResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "An error message when creating a new user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "description": "A user information object",
+          "required": false,
+          "content": {}
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "username": {
+        "type": "string",
+        "pattern": "^[-a-z0-9_]+$"
+      },
+      "membershipType": {
+        "type": "string",
+        "enum": [
+          "premium",
+          "standard"
+        ]
+      },
+      "SessionId": {
+        "type": "string"
+      }
+    }
+  }
+}

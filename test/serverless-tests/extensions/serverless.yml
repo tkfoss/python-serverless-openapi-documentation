@@ -1,0 +1,27 @@
+service: serverless-extensions-test
+provider:
+  name: aws
+  runtime: nodejs14.x
+
+functions:
+  test:
+    handler: handler.hello
+    events:
+      - http:
+          path: test
+          method: get
+
+custom:
+  documentation:
+    title: Test API with Extensions
+    version: 1.0.1
+    x-logo:
+      url: "https://example.com/logo.png"
+      altText: "My Logo"
+    contact:
+      name: API Support
+      email: support@example.com
+      x-slack-channel: "#api-support"
+    license:
+      name: MIT
+      x-license-id: "MIT"
