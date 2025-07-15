@@ -223,7 +223,16 @@ def generate_serverless_config(successfully_generated_schemas, project_meta, pro
             documentation_block["contact"]["email"] = project_meta["contact_email"]
 
     functions_file = project_root / "serverless" / "functions.yml"
-    functions_ref = f"${{file(./serverless/functions.yml)}}" if functions_file.exists() else {}
+    functions_content = {}
+    if functions_file.exists():
+        try:
+            with open(functions_file, "r") as f:
+                functions_content = yaml.safe_load(f)
+            print(f"  Successfully loaded functions from {functions_file}")
+        except Exception as e:
+            print(f"  Warning: Could not read or parse functions file {functions_file}: {e}")
+    else:
+        print("  Warning: functions.yml not found. No operations will be generated.")
 
 
     config_content = {
@@ -235,7 +244,7 @@ def generate_serverless_config(successfully_generated_schemas, project_meta, pro
             "documentation": documentation_block,
             "variables": {"lambda_warm_instances": 1, "lambda_memory_size": 256},
         },
-        "functions": functions_ref,
+        "functions": functions_content,
     }
     
     return config_content
