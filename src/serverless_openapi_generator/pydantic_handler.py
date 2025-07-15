@@ -22,11 +22,13 @@ class CustomJsonSchemaGenerator(GenerateJsonSchema):
     def core_schema_schema(self, core_schema: core_schema.CoreSchema) -> JsonSchemaValue:
         # Handle aws-lambda-powertools types that Pydantic can't process by default
         if isinstance(core_schema, core_schema.IsInstanceSchema):
-            if 'CaseInsensitiveDict' in str(core_schema.cls) or 'Cookie' in str(core_schema.cls):
+            cls_name = str(core_schema.cls)
+            if 'CaseInsensitiveDict' in cls_name or 'Cookie' in cls_name:
                 return {'type': 'object'}
         
         # Fallback to the default behavior for all other types
         return super().core_schema_schema(core_schema)
+
 
 
 def is_pydantic_model(obj):
@@ -139,6 +141,30 @@ def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path)
                 model_class.update_forward_refs()
             rebuilt_models_count += 1
             models_for_schema_gen.append((model_class, model_name, module_name))
+        except NameError as e:
+            # Attempt to handle undefined forward references dynamically
+            match = re.search(r"name '(\w+)' is not defined", str(e))
+            if match:
+                undefined_name = match.group(1)
+                rprint(f"  [yellow]Undefined name '{undefined_name}' found. Creating a dummy class to resolve forward reference.[/yellow]")
+                dummy_class = type(undefined_name, (dict,), {})
+                module = sys.modules[module_name]
+                setattr(module, undefined_name, dummy_class)
+                
+                # Retry rebuilding the model
+                try:
+                    if hasattr(model_class, "model_rebuild"):
+                        model_class.model_rebuild(force=True)
+                    elif hasattr(model_class, "update_forward_refs"):
+                        model_class.update_forward_refs()
+                    rebuilt_models_count += 1
+                    models_for_schema_gen.append((model_class, model_name, module_name))
+                except Exception as e_retry:
+                    rprint(f"  [red]Error rebuilding model {module_name}.{model_name} after creating dummy class: {e_retry}[/red]")
+                    models_for_schema_gen.append((model_class, model_name, module_name))
+            else:
+                rprint(f"  [red]Error rebuilding model {module_name}.{model_name}: {e}[/red]")
+                models_for_schema_gen.append((model_class, model_name, module_name))
         except Exception as e:
             rprint(f"  [red]Error rebuilding model {module_name}.{model_name}: {e}[/red]")
             models_for_schema_gen.append((model_class, model_name, module_name))
