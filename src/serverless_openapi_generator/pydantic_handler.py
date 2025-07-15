@@ -9,11 +9,24 @@ from pathlib import Path
 import yaml
 from rich import print as rprint
 from pydantic import BaseModel
+from pydantic.json_schema import GenerateJsonSchema, JsonSchemaValue
+from pydantic_core import core_schema
 
 try:
     from pydantic.errors import PydanticInvalidForJsonSchema
 except ImportError:
     PydanticInvalidForJsonSchema = Exception
+
+# --- Custom JSON Schema Generator to handle unsupported types ---
+class CustomJsonSchemaGenerator(GenerateJsonSchema):
+    def core_schema_schema(self, core_schema: core_schema.CoreSchema) -> JsonSchemaValue:
+        # Handle aws-lambda-powertools types that Pydantic can't process by default
+        if isinstance(core_schema, core_schema.IsInstanceSchema):
+            if 'CaseInsensitiveDict' in str(core_schema.cls) or 'Cookie' in str(core_schema.cls):
+                return {'type': 'object'}
+        
+        # Fallback to the default behavior for all other types
+        return super().core_schema_schema(core_schema)
 
 
 def is_pydantic_model(obj):
@@ -57,38 +70,61 @@ def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path)
     discovered_models = []
     processed_dto_files = set()
     successfully_generated_schemas = {}
-
-    for dto_file_path in source_dir.rglob("**/dtos.py"):
-        if dto_file_path in processed_dto_files:
-            continue
-        processed_dto_files.add(dto_file_path)
-
-        rprint(f"  [cyan]Processing DTO file: {dto_file_path}[/cyan]")
-        relative_path = dto_file_path.relative_to(import_root)
-        module_name_parts = list(relative_path.parts)
-        if module_name_parts[-1] == "dtos.py":
-            module_name_parts[-1] = "dtos"
-        module_name = ".".join(part for part in module_name_parts if part != "__pycache__")
-
-        try:
-            spec = importlib.util.spec_from_file_location(module_name, dto_file_path)
-            if spec and spec.loader:
-                module = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = module
-                spec.loader.exec_module(module)
-            else:
-                rprint(f"\t[yellow]Could not create module spec for {dto_file_path}[/yellow]")
+    
+    dto_files = list(source_dir.rglob("**/dtos.py"))
+    
+    for pass_num in range(3): # Try to resolve imports up to 3 times
+        if not dto_files:
+            break
+            
+        rprint(f"\n[bold]Import Pass {pass_num + 1}...[/bold]")
+        
+        remaining_files = []
+        
+        for dto_file_path in dto_files:
+            if dto_file_path in processed_dto_files:
                 continue
-        except Exception as e:
-            rprint(f"\t[red]Error importing module {module_name} from {dto_file_path}: {e}[/red]")
-            if module_name in sys.modules:
-                del sys.modules[module_name]
-            continue
 
-        for name, obj in inspect.getmembers(module):
-            if is_pydantic_model(obj):
-                if hasattr(obj, "__module__") and obj.__module__ == module_name:
-                    discovered_models.append((obj, name, module_name))
+            rprint(f"  [cyan]Processing DTO file: {dto_file_path}[/cyan]")
+            relative_path = dto_file_path.relative_to(import_root)
+            module_name_parts = list(relative_path.parts)
+            if module_name_parts[-1] == "dtos.py":
+                module_name_parts[-1] = "dtos"
+            module_name = ".".join(part for part in module_name_parts if part != "__pycache__")
+
+            try:
+                spec = importlib.util.spec_from_file_location(module_name, dto_file_path)
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[module_name] = module
+                    spec.loader.exec_module(module)
+                else:
+                    rprint(f"\t[yellow]Could not create module spec for {dto_file_path}[/yellow]")
+                    continue
+            except ImportError as e:
+                rprint(f"\t[yellow]Deferring import of {dto_file_path} due to ImportError: {e}[/yellow]")
+                remaining_files.append(dto_file_path)
+                if module_name in sys.modules:
+                    del sys.modules[module_name]
+                continue
+            except Exception as e:
+                rprint(f"\t[red]Error importing module {module_name} from {dto_file_path}: {e}[/red]")
+                if module_name in sys.modules:
+                    del sys.modules[module_name]
+                continue
+
+            processed_dto_files.add(dto_file_path)
+            for name, obj in inspect.getmembers(module):
+                if is_pydantic_model(obj):
+                    if hasattr(obj, "__module__") and obj.__module__ == module_name:
+                        discovered_models.append((obj, name, module_name))
+        
+        dto_files = remaining_files
+
+    if dto_files:
+        rprint("\n[bold red]Could not resolve all imports after multiple passes. The following files failed:[/bold red]")
+        for f in dto_files:
+            rprint(f"  - {f}")
 
     rprint(f"\n[bold]Found {len(discovered_models)} Pydantic models from {len(processed_dto_files)} DTO file(s).[/bold]")
 
@@ -114,7 +150,7 @@ def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path)
         rprint(f"  [cyan]Generating schema for: {module_name}.{model_name}[/cyan]")
         try:
             if hasattr(model_class, "model_json_schema"):
-                schema = model_class.model_json_schema()
+                schema = model_class.model_json_schema(schema_generator=CustomJsonSchemaGenerator)
             elif hasattr(model_class, "schema_json"):
                 schema = json.loads(model_class.schema_json())
             else:
@@ -185,8 +221,10 @@ def generate_serverless_config(successfully_generated_schemas, project_meta, pro
     rprint("\n[bold]Generating Serverless config for OpenAPI in memory...[/bold]")
     python_runtime = "python3.12"
     try:
-        main_sls_file = project_root / "serverless-wo-cross-accounts.yml"
-        if main_sls_file.exists():
+        # Look for any serverless.yml or serverless.yaml file in the project root
+        sls_files = list(project_root.glob("serverless.y*ml"))
+        if sls_files:
+            main_sls_file = sls_files[0]
             with open(main_sls_file, "r") as f:
                 main_config = yaml.safe_load(f)
             if main_config and "provider" in main_config and "runtime" in main_config["provider"]:
