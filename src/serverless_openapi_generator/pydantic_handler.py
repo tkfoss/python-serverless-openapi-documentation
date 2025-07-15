@@ -96,8 +96,8 @@ def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path)
                 spec = importlib.util.spec_from_file_location(module_name, dto_file_path)
                 if spec and spec.loader:
                     module = importlib.util.module_from_spec(spec)
-                    sys.modules[module_name] = module
                     spec.loader.exec_module(module)
+                    sys.modules[module_name] = module
                 else:
                     rprint(f"\t[yellow]Could not create module spec for {dto_file_path}[/yellow]")
                     continue
