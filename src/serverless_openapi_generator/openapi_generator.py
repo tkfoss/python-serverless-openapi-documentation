@@ -121,9 +121,13 @@ class DefinitionGenerator:
                 if not http_event:
                     continue
 
-                documentation = http_event.get('documentation', {})
-                if not documentation:
+                documentation = http_event.get('documentation')
+
+                if documentation is False:
                     continue
+                
+                if documentation is None:
+                    documentation = {}
 
                 path = http_event.get('path')
                 method = http_event.get('method', 'get').lower()
