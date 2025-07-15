@@ -10,8 +10,8 @@ from .schema_handler import SchemaHandler
 
 class DefinitionGenerator:
     def __init__(self, serverless_config, serverless_yml_path, openapi_version='3.0.3'):
-        self.serverless_config = serverless_config
         self.serverless_dir = os.path.dirname(serverless_yml_path)
+        self.serverless_config = self._resolve_file_references(serverless_config)
         owasp.get_latest()
         self.open_api = {
             "openapi": openapi_version,
@@ -22,6 +22,24 @@ class DefinitionGenerator:
             }
         }
         self.schema_handler = SchemaHandler(self.serverless_config, self.open_api, self.serverless_dir)
+
+    def _resolve_file_references(self, value):
+        if isinstance(value, dict):
+            return {k: self._resolve_file_references(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [self._resolve_file_references(item) for item in value]
+        elif isinstance(value, str):
+            match = re.match(r'\${file\((.*)\)}', value)
+            if match:
+                file_path = match.group(1).strip()
+                abs_path = os.path.join(self.serverless_dir, file_path)
+                try:
+                    with open(abs_path, 'r') as f:
+                        return yaml.safe_load(f)
+                except (IOError, yaml.YAMLError) as e:
+                    print(f"Warning: Could not read or parse file reference {abs_path}: {e}")
+                    return value
+        return value
 
     def generate(self):
         self.schema_handler.add_models_to_openapi()
@@ -334,16 +352,29 @@ class DefinitionGenerator:
 
     def create_response_headers(self, headers_doc):
         headers = {}
-        for header_name, header_details in headers_doc.items():
-            header_obj = {
-                'description': header_details.get('description', '')
-            }
-            if 'schema' in header_details:
-                # Following the pattern of creating a schema in components for the header
-                schema_ref = self.schema_handler.create_schema(header_name, header_details['schema'])
-                header_obj['schema'] = {'$ref': schema_ref}
-            
-            headers[header_name] = header_obj
+        if isinstance(headers_doc, list):
+            for header in headers_doc:
+                header_name = header.get('name')
+                if not header_name:
+                    continue
+                header_obj = {
+                    'description': header.get('description', '')
+                }
+                if 'schema' in header:
+                    schema_ref = self.schema_handler.create_schema(header_name, header['schema'])
+                    header_obj['schema'] = {'$ref': schema_ref}
+                headers[header_name] = header_obj
+        elif isinstance(headers_doc, dict):
+            for header_name, header_details in headers_doc.items():
+                header_obj = {
+                    'description': header_details.get('description', '')
+                }
+                if 'schema' in header_details:
+                    # Following the pattern of creating a schema in components for the header
+                    schema_ref = self.schema_handler.create_schema(header_name, header_details['schema'])
+                    header_obj['schema'] = {'$ref': schema_ref}
+                
+                headers[header_name] = header_obj
         return headers
 
 def main():
