@@ -99,16 +99,22 @@ class SchemaHandler:
 
     def _clean_schema(self, schema):
         if isinstance(schema, dict):
-            # Replace $defs with definitions and update refs
+            # Move $defs to global components instead of keeping them nested
             if '$defs' in schema:
-                if 'definitions' not in schema:
-                    schema['definitions'] = {}
-                schema['definitions'].update(schema.pop('$defs'))
+                defs = schema.pop('$defs')
                 
+                # Add each definition to the global components/schemas
+                for def_name, def_schema in defs.items():
+                    if def_name not in self.open_api['components']['schemas']:
+                        cleaned_def = self._clean_schema(def_schema)
+                        self.open_api['components']['schemas'][def_name] = cleaned_def
+                
+                # Update all references from #/$defs/ to #/components/schemas/
                 def update_refs(node):
                     if isinstance(node, dict):
                         if '$ref' in node and node['$ref'].startswith('#/$defs/'):
-                            node['$ref'] = node['$ref'].replace('#/$defs/', '#/definitions/')
+                            ref_name = node['$ref'].replace('#/$defs/', '')
+                            node['$ref'] = f'#/components/schemas/{ref_name}'
                         for key, value in node.items():
                             update_refs(value)
                     elif isinstance(node, list):
@@ -123,6 +129,11 @@ class SchemaHandler:
             # Remove propertyNames
             if 'propertyNames' in schema:
                 del schema['propertyNames']
+            
+            # Fix empty items objects for arrays
+            if schema.get('type') == 'array' and 'items' in schema:
+                if schema['items'] == {}:
+                    schema['items'] = {'type': 'string'}  # Default to string items
             
             # Handle nullable
             if 'anyOf' in schema:

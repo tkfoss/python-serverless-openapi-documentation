@@ -12,6 +12,40 @@ from pydantic import BaseModel
 from pydantic.json_schema import GenerateJsonSchema, JsonSchemaValue
 from pydantic_core import core_schema
 
+def add_dependencies_to_path():
+    """Dynamically add project dependencies to the Python path."""
+    try:
+        # Assuming we are in a Poetry project, find pyproject.toml
+        pyproject_path = Path.cwd() / "pyproject.toml"
+        if not pyproject_path.exists():
+            return
+
+        with open(pyproject_path, "rb") as f:
+            pyproject_data = tomllib.load(f)
+        
+        # Find the .venv path
+        project_name = pyproject_data.get("tool", {}).get("poetry", {}).get("name")
+        if not project_name:
+            return
+        
+        # Common venv path structure
+        venv_path = Path.home() / ".cache" / "pypoetry" / "virtualenvs"
+        
+        # Find the specific venv directory
+        for venv in venv_path.iterdir():
+            if venv.name.startswith(project_name):
+                site_packages = venv / "lib" / f"python{sys.version_major}.{sys.version_minor}" / "site-packages"
+                if site_packages.exists() and str(site_packages) not in sys.path:
+                    sys.path.insert(0, str(site_packages))
+                    break
+
+    except Exception as e:
+        rprint(f"[yellow]Could not add dependencies to path: {e}[/yellow]")
+
+
+# --- Add dependencies before other imports ---
+add_dependencies_to_path()
+
 try:
     from pydantic.errors import PydanticInvalidForJsonSchema
 except ImportError:
@@ -19,44 +53,97 @@ except ImportError:
 
 # --- Custom JSON Schema Generator to handle unsupported types ---
 class CustomJsonSchemaGenerator(GenerateJsonSchema):
-    def core_schema_schema(self, core_schema: core_schema.CoreSchema) -> JsonSchemaValue:
-        # Handle aws-lambda-powertools types that Pydantic can't process by default
-        if isinstance(core_schema, core_schema.IsInstanceSchema):
-            cls_name = str(core_schema.cls)
-            if 'CaseInsensitiveDict' in cls_name or 'Cookie' in cls_name:
-                return {'type': 'object'}
-        
-        # Fallback to the default behavior for all other types
-        return super().core_schema_schema(core_schema)
+    """
+    Custom JSON schema generator to handle complex/unsupported types by overriding
+    the specific schema generation methods that fail.
+    """
+    def is_instance_schema(self, schema: core_schema.IsInstanceSchema) -> JsonSchemaValue:
+        """
+        Handles `IsInstanceSchema` which is used for many complex types like
+        AWS Powertools objects that don't have a direct JSON schema representation.
+        """
+        cls = schema.get('cls')
+        if cls:
+            cls_name = str(cls)
+            if 'CaseInsensitiveDict' in cls_name:
+                return {'type': 'object', 'description': 'Case-insensitive dictionary, typically for headers.'}
+            if 'Cookie' in cls_name:
+                return {'type': 'string', 'description': 'HTTP Cookie string.'}
+            # Fallback for other Powertools or complex objects
+            if 'aws_lambda_powertools' in cls_name:
+                return {'type': 'object', 'description': 'Generic AWS Powertools object.'}
+
+        # If we can't provide a custom schema, let the default handler try.
+        # If it fails, we'll catch it in the `generate_dto_schemas` function.
+        return super().is_instance_schema(schema)
 
 
 
 def is_pydantic_model(obj):
-    """Checks if an object is a Pydantic model class, excluding BaseModel itself."""
-    return inspect.isclass(obj) and issubclass(obj, BaseModel) and obj is not BaseModel
+    """
+    Checks if an object is a Pydantic model class, excluding BaseModel itself
+    and abstract models with no fields.
+    """
+    if not (inspect.isclass(obj) and issubclass(obj, BaseModel) and obj is not BaseModel):
+        return False
+
+    # Consider a model abstract if it has no fields of its own
+    if not any(name for name, field in obj.model_fields.items()):
+        rprint(f"  [yellow]Skipping abstract model with no fields: {obj.__name__}[/yellow]")
+        return False
+        
+    return True
 
 
 def patch_token_region_request_schema(schema_file_path):
     """Specifically patches the TokenRegionRequest.json schema for the body.anyOf[1] issue."""
     try:
-        with open(schema_file_path, "r") as f:
+        with open(schema_file_path, "r+") as f:
             schema_data = json.load(f)
+            body_prop = schema_data.get("properties", {}).get("body", {})
+            any_of_list = body_prop.get("anyOf")
 
-        body_prop = schema_data.get("properties", {}).get("body", {})
-        any_of_list = body_prop.get("anyOf")
-
-        if isinstance(any_of_list, list) and len(any_of_list) > 1:
-            if any_of_list[1] == {}:  # Check if the problematic empty object is at index 1
-                rprint(
-                    f"    [yellow]Patching {schema_file_path}: changing properties.body.anyOf[1] from {{}} to {{'type': 'object'}}[/yellow]"
-                )
+            if isinstance(any_of_list, list) and len(any_of_list) > 1 and any_of_list[1] == {}:
+                rprint(f"    [yellow]Patching {schema_file_path}: changing properties.body.anyOf[1] from {{}} to {{'type': 'object'}}[/yellow]")
                 any_of_list[1] = {"type": "object"}
-
-                with open(schema_file_path, "w") as f:
-                    json.dump(schema_data, f, indent=2)
+                f.seek(0)
+                json.dump(schema_data, f, indent=2)
+                f.truncate()
                 rprint(f"    [green]Successfully patched {schema_file_path}[/green]")
     except Exception as e:
         rprint(f"    [red]Error patching {schema_file_path}: {e}[/red]")
+
+
+def patch_request_body_schema(schema_file_path: Path):
+    """
+    Patches schemas for request models that have a problematic 'body' property
+    with a complex 'anyOf' generated from Union[Json[Model], Model].
+    This simplifies it to a direct '$ref', which is valid in OpenAPI.
+    """
+    try:
+        with open(schema_file_path, "r+") as f:
+            schema_data = json.load(f)
+            if "properties" not in schema_data or "body" not in schema_data["properties"]:
+                return
+
+            body_prop = schema_data["properties"]["body"]
+            any_of_list = body_prop.get("anyOf")
+
+            if not isinstance(any_of_list, list):
+                return
+
+            # Find the part of the 'anyOf' that contains the '$ref'
+            ref_schema = next((item for item in any_of_list if '$ref' in item), None)
+
+            if ref_schema:
+                rprint(f"    [yellow]Patching body of {schema_file_path.name}: simplifying complex 'anyOf' to a direct '$ref'[/yellow]")
+                schema_data["properties"]["body"] = ref_schema
+                f.seek(0)
+                json.dump(schema_data, f, indent=2)
+                f.truncate()
+
+    except Exception as e:
+        rprint(f"    [red]Error patching request body for {schema_file_path.name}: {e}[/red]")
 
 
 def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path):
@@ -119,6 +206,7 @@ def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path)
             for name, obj in inspect.getmembers(module):
                 if is_pydantic_model(obj):
                     if hasattr(obj, "__module__") and obj.__module__ == module_name:
+                        
                         discovered_models.append((obj, name, module_name))
         
         dto_files = remaining_files
@@ -175,12 +263,27 @@ def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path)
     for model_class, model_name, module_name in models_for_schema_gen:
         rprint(f"  [cyan]Generating schema for: {module_name}.{model_name}[/cyan]")
         try:
+            schema = None
+            
+            # Try multiple schema generation approaches
             if hasattr(model_class, "model_json_schema"):
-                schema = model_class.model_json_schema(schema_generator=CustomJsonSchemaGenerator)
+                try:
+                    schema = model_class.model_json_schema(schema_generator=CustomJsonSchemaGenerator)
+                except Exception as e:
+                    rprint(f"\t[yellow]Custom generator failed, trying default: {e}[/yellow]")
+                    try:
+                        schema = model_class.model_json_schema()
+                    except Exception as e2:
+                        rprint(f"\t[yellow]Default generator also failed: {e2}[/yellow]")
+                        
             elif hasattr(model_class, "schema_json"):
-                schema = json.loads(model_class.schema_json())
-            else:
-                rprint(f"\t[yellow]Could not find schema generation method for model {model_name}[/yellow]")
+                try:
+                    schema = json.loads(model_class.schema_json())
+                except Exception as e:
+                    rprint(f"\t[yellow]Legacy schema_json failed: {e}[/yellow]")
+            
+            if schema is None:
+                rprint(f"\t[yellow]Skipping {model_name} - no compatible schema generation method or all methods failed[/yellow]")
                 continue
 
             schema_file_name = f"{model_name}.json"
@@ -191,12 +294,17 @@ def generate_dto_schemas(source_dir: Path, output_dir: Path, project_root: Path)
 
             if model_name == "TokenRegionRequest":
                 patch_token_region_request_schema(schema_file_path)
+            
+            # Apply a patch for any model ending in 'Request' as they might have the problematic body schema
+            if model_name.endswith("Request"):
+                patch_request_body_schema(schema_file_path)
 
             successfully_generated_schemas[model_name] = schema_file_name
+            
         except PydanticInvalidForJsonSchema as e:
-            rprint(f"\t[red]Error: Cannot generate JSON schema for {module_name}.{model_name}. Details: {e}[/red]")
+            rprint(f"\t[yellow]Skipping {module_name}.{model_name} - incompatible with JSON schema generation: {str(e).split('For further information')[0].strip()}[/yellow]")
         except Exception as e:
-            rprint(f"\t[red]Error generating/saving schema for model {module_name}.{model_name}: {e}[/red]")
+            rprint(f"\t[yellow]Skipping {module_name}.{model_name} - error during processing: {e}[/yellow]")
 
     rprint(f"\n[bold green]Successfully generated {len(successfully_generated_schemas)} DTO JSON schema file(s).[/bold green]")
     return successfully_generated_schemas
